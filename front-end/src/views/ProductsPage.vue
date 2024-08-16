@@ -19,7 +19,8 @@ export default {
   },
 
   async created() {
-    const result = await axios.get("http://localhost:8000/api/products");
+    const userId = localStorage.getItem('id');
+    const result = await axios.get(`http://localhost:8000/api/products?userId=${userId}`);
     console.log(result);
     // loads product data from server
     const products = result.data;

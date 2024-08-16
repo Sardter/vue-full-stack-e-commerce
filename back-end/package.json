@@ -32,7 +32,8 @@
     "cors": "^2.8.5",
     "express": "^4.17.1",
     "jsonwebtoken": "^9.0.2",
-    "mongodb": "^3.6.3"
+    "mongodb": "^3.6.3",
+    "natural": "^8.0.1"
   },
   "devDependencies": {
     "@babel/cli": "^7.12.8",

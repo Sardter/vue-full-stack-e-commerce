@@ -3,6 +3,7 @@ import bodyParser from "body-parser";
 import mongodb from "mongodb";
 import cors from "cors";
 import jwt from "jsonwebtoken";
+import natural from 'natural';
 
 const products = [
   {
@@ -127,7 +128,26 @@ const products = [
   },
 ];
 
-export async function insertProducts() {
+function cosineSimilarity(textA, textB) {
+  const tokenizer = new natural.WordTokenizer();
+  const tokensA = tokenizer.tokenize(textA.toLowerCase());
+  const tokensB = tokenizer.tokenize(textB.toLowerCase());
+
+  const tfidf = new natural.TfIdf();
+  tfidf.addDocument(tokensA);
+  tfidf.addDocument(tokensB);
+
+  const vecA = tfidf.listTerms(0).map(term => term.tfidf);
+  const vecB = tfidf.listTerms(1).map(term => term.tfidf);
+
+  const dotProduct = vecA.reduce((sum, a, idx) => sum + (a * vecB[idx] || 0), 0);
+  const magnitudeA = Math.sqrt(vecA.reduce((sum, a) => sum + (a * a), 0));
+  const magnitudeB = Math.sqrt(vecB.reduce((sum, b) => sum + (b * b), 0));
+
+  return dotProduct / (magnitudeA * magnitudeB);
+}
+
+export async  function insertProducts() {
   const client = new MongoClient("mongodb://root:example@mongo:27017", {
     useNewUrlParser: true,
     useUnifiedTopology: true,
@@ -137,20 +157,33 @@ export async function insertProducts() {
     await client.connect();
     const db = client.db("vue-db");
 
-    for (const product of products) {
-      await db
-        .collection("products")
-        .updateOne({ id: product.id }, { $set: product }, { upsert: true });
+    // Calculate similarity for each product pair and update the product documents
+    for (let i = 0; i < products.length; i++) {
+      const product = products[i];
+      const similarities = products
+        .filter(p => p.id !== product.id) // Exclude the current product
+        .map(p => ({
+          id: p.id,
+          similarity: cosineSimilarity(product.description, p.description)
+        }))
+        .sort((a, b) => b.similarity - a.similarity); // Sort by similarity descending
+
+      const recommendedProductIds = similarities.map(sim => sim.id);
+
+      await db.collection("products").updateOne(
+        { id: product.id },
+        { $set: { ...product, recommendedProductIds } },
+        { upsert: true }
+      );
     }
 
-    console.log("Products have been initialized or updated.");
+    console.log("Products have been initialized or updated with similarities.");
   } catch (error) {
     console.error("Error inserting products:", error);
   } finally {
     await client.close();
   }
 }
-
 const { MongoClient } = mongodb;
 
 const JWT_SECRET = "your_jwt_secret";
@@ -223,6 +256,8 @@ app.post("/api/login", async (req, res) => {
 });
 
 app.get("/api/products", async (req, res) => {
+  const { userId } = req.query;
+
   try {
     const client = await MongoClient.connect(process.env.MONGO_URL, {
       useNewUrlParser: true,
@@ -230,13 +265,45 @@ app.get("/api/products", async (req, res) => {
     });
 
     const db = client.db(process.env.MONGO_DBNAME || "vue-db");
-    const products = await db.collection("products").find({}).toArray();
+
+    let products;
+    
+    if (userId) {
+      // Fetch user information
+      const user = await db.collection("users").findOne({ _id: new mongodb.ObjectId(userId) });
+
+      if (user && user.cartItems && user.cartItems.length > 0) {
+        // Fetch products from the cart
+        const cartProducts = await db.collection("products").find({ id: { $in: user.cartItems } }).toArray();
+
+        // Aggregate recommended product IDs
+        let recommendedProductIds = new Set();
+        cartProducts.forEach(product => {
+          product.recommendedProductIds.forEach(id => recommendedProductIds.add(id));
+        });
+
+        // Convert set to array and fetch the recommended products from the database
+        recommendedProductIds = Array.from(recommendedProductIds);
+
+        // Fetch the recommended products from the database
+        products = await db.collection("products").find({ id: { $in: recommendedProductIds } }).toArray();
+
+      } else {
+        // If the cart is empty, return all products
+        products = await db.collection("products").find({}).toArray();
+      }
+    } else {
+      // If no userID is provided, return all products
+      products = await db.collection("products").find({}).toArray();
+    }
+
     res.status(200).json(products);
     client.close();
   } catch (error) {
     res.status(500).json({ message: "Error connecting to db", error });
   }
 });
+
 
 app.get("/api/users/:userId/cart", async (req, res) => {
   const { userId } = req.params;
