@@ -22,7 +22,7 @@ This is a full-stack eCommerce web application built using **Node.js**, **Vue.js
 
     ```bash
     git clone https://github.com/your-username/vue-full-stack-e-commerce.git
-    cd ecommerce-project
+    cd vue-full-stack-e-commerce
     ```
 
 2. **Start the application with Docker Compose:**
